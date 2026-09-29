@@ -3,6 +3,7 @@ import type { MeteoriteSample } from '../types/sample';
 import type { FindRecord } from '../types/find';
 import type { ThinSection } from '../types/section';
 import type { AnalysisRecord } from '../types/analysis';
+import type { LoanRecord } from '../types/loan';
 
 /** 库名固定为 gbmeteorite-db */
 export const DB_NAME = 'gbmeteorite-db';
@@ -12,12 +13,15 @@ export const DB_NAME = 'gbmeteorite-db';
  *  - v1：建 samples / finds / sections 三张表
  *  - v2：新增 analysis 表，并为 analysis 加 sampleId 索引
  *  - v3：为 samples 补 updatedAt 字段，并按 id 回填旧记录
+ *  - v4：新增 loans 借阅台账表；旧册中标记 loan-out 但无台账的样本，
+ *        补建遗留借阅记录（借阅人/应还日期缺失，待补全）
  */
 export class MeteoriteDB extends Dexie {
   samples!: Table<MeteoriteSample, string>;
   finds!: Table<FindRecord, string>;
   sections!: Table<ThinSection, string>;
   analysis!: Table<AnalysisRecord, string>;
+  loans!: Table<LoanRecord, string>;
 
   constructor() {
     super(DB_NAME);
@@ -65,6 +69,69 @@ export class MeteoriteDB extends Dexie {
             }
           });
       });
+
+    this.version(4)
+      .stores({
+        samples:
+          'id, sampleNo, category, chemicalGroup, totalWeight, createdAt, updatedAt',
+        finds: 'id, sampleId, region, createdAt',
+        sections: 'id, sectionNo, sampleId, thickness, createdAt',
+        analysis: 'id, sampleId, sectionId, method, testedAt, createdAt',
+        loans:
+          'id, sampleId, sampleNo, status, borrower, loanedAt, dueDate, returnedAt, legacy, createdAt',
+      })
+      .upgrade(async (tx) => {
+        // v4：外借台账。旧册中标记 loan-out 但无台账的样本，补建遗留借阅记录
+        // （借阅人/应还日期缺失，待补全），并固化借出前切片与检测快照。
+        const samples = await tx.table<MeteoriteSample, string>('samples').toArray();
+        const sectionsTable = tx.table<ThinSection, string>('sections');
+        const analysisTable = tx.table<AnalysisRecord, string>('analysis');
+        const loansTable = tx.table<LoanRecord, string>('loans');
+        for (const sample of samples) {
+          if (sample.storage !== 'loan-out') continue;
+          const exist = await loansTable
+            .where('sampleId')
+            .equals(sample.id)
+            .filter((l) => l.status === 'open')
+            .first();
+          if (exist) continue;
+          const secs = await sectionsTable.where('sampleId').equals(sample.id).toArray();
+          const recs = await analysisTable.where('sampleId').equals(sample.id).toArray();
+          const now = Date.now();
+          await loansTable.add({
+            id: makeId('loan'),
+            sampleId: sample.id,
+            sampleNo: sample.sampleNo,
+            status: 'open',
+            borrower: '',
+            loanedAt: new Date((sample.createdAt || now) - 86400000 * 30)
+              .toISOString()
+              .slice(0, 10),
+            dueDate: null,
+            returnedAt: null,
+            sectionsSnapshot: secs.map((s) => ({
+              sectionId: s.id,
+              sectionNo: s.sectionNo,
+              thickness: s.thickness,
+              preparation: s.preparation,
+              quality: s.quality,
+            })),
+            analysisSnapshot: recs.map((a) => ({
+              analysisId: a.id,
+              method: a.method,
+              target: a.target,
+              testedAt: a.testedAt,
+              fa: a.fa,
+              fs: a.fs,
+              ni: a.ni,
+              kamaciteBandwidth: a.kamaciteBandwidth,
+            })),
+            legacy: true,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      });
   }
 }
 
@@ -81,7 +148,7 @@ export async function seedIfEmpty(): Promise<void> {
   const count = await db.samples.count();
   if (count > 0) return;
   const now = Date.now();
-  await db.transaction('rw', db.samples, db.finds, db.sections, db.analysis, async () => {
+  await db.transaction('rw', db.samples, db.finds, db.sections, db.analysis, db.loans, async () => {
     await db.samples.bulkAdd([
       {
         id: 'sample_seed_1',
@@ -91,7 +158,7 @@ export async function seedIfEmpty(): Promise<void> {
         chemicalGroup: 'H',
         weathering: 'W1',
         fallOrFind: 'find',
-        storage: 'cabinet-a',
+        storage: 'loan-out',
         note: '撒哈拉回收，熔壳完整',
         createdAt: now - 86400000 * 40,
         updatedAt: now - 86400000 * 40,
@@ -104,7 +171,7 @@ export async function seedIfEmpty(): Promise<void> {
         chemicalGroup: 'IAB',
         weathering: 'W0',
         fallOrFind: 'find',
-        storage: 'cabinet-b',
+        storage: 'loan-out',
         note: '八面体结构清晰',
         createdAt: now - 86400000 * 30,
         updatedAt: now - 86400000 * 30,
@@ -117,7 +184,7 @@ export async function seedIfEmpty(): Promise<void> {
         chemicalGroup: 'ungrouped',
         weathering: 'W2',
         fallOrFind: 'fall',
-        storage: 'desiccator',
+        storage: 'loan-out',
         note: '目击坠落，无熔壳',
         createdAt: now - 86400000 * 18,
         updatedAt: now - 86400000 * 18,
@@ -197,6 +264,92 @@ export async function seedIfEmpty(): Promise<void> {
         kamaciteBandwidth: 0.62,
         testedAt: '2024-07-03',
         createdAt: now - 86400000 * 12,
+      },
+    ]);
+    // 旧册遗留：三份样本标着外借中，却缺借阅人与应还日期，待补全
+    await db.loans.bulkAdd([
+      {
+        id: 'loan_seed_1',
+        sampleId: 'sample_seed_1',
+        sampleNo: 'MET-2024-001',
+        status: 'open',
+        borrower: '',
+        loanedAt: new Date(now - 86400000 * 45).toISOString().slice(0, 10),
+        dueDate: null,
+        returnedAt: null,
+        sectionsSnapshot: [
+          {
+            sectionId: 'section_seed_1',
+            sectionNo: 'TS-2024-001',
+            thickness: 30,
+            preparation: 'resin',
+            quality: 'good',
+          },
+        ],
+        analysisSnapshot: [
+          {
+            analysisId: 'analysis_seed_1',
+            method: 'microprobe',
+            target: 'sample',
+            testedAt: '2024-06-12',
+            fa: 18.6,
+            fs: 16.2,
+            ni: 0.8,
+            kamaciteBandwidth: 0.02,
+          },
+        ],
+        legacy: true,
+        createdAt: now - 86400000 * 45,
+        updatedAt: now - 86400000 * 45,
+      },
+      {
+        id: 'loan_seed_2',
+        sampleId: 'sample_seed_2',
+        sampleNo: 'MET-2024-002',
+        status: 'open',
+        borrower: '',
+        loanedAt: new Date(now - 86400000 * 30).toISOString().slice(0, 10),
+        dueDate: null,
+        returnedAt: null,
+        sectionsSnapshot: [
+          {
+            sectionId: 'section_seed_2',
+            sectionNo: 'TS-2024-002',
+            thickness: 60,
+            preparation: 'epoxy',
+            quality: 'fair',
+          },
+        ],
+        analysisSnapshot: [
+          {
+            analysisId: 'analysis_seed_2',
+            method: 'sem-eds',
+            target: 'sample',
+            testedAt: '2024-07-03',
+            fa: 3.2,
+            fs: 4.1,
+            ni: 7.4,
+            kamaciteBandwidth: 0.62,
+          },
+        ],
+        legacy: true,
+        createdAt: now - 86400000 * 30,
+        updatedAt: now - 86400000 * 30,
+      },
+      {
+        id: 'loan_seed_3',
+        sampleId: 'sample_seed_3',
+        sampleNo: 'MET-2024-003',
+        status: 'open',
+        borrower: '',
+        loanedAt: new Date(now - 86400000 * 20).toISOString().slice(0, 10),
+        dueDate: null,
+        returnedAt: null,
+        sectionsSnapshot: [],
+        analysisSnapshot: [],
+        legacy: true,
+        createdAt: now - 86400000 * 20,
+        updatedAt: now - 86400000 * 20,
       },
     ]);
   });

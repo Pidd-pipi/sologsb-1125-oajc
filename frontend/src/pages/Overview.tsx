@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -25,6 +26,7 @@ import {
   SAMPLE_CATEGORIES,
   CHEMICAL_GROUPS,
 } from '../types/sample';
+import { isIncomplete, isOverdue } from '../utils/loan';
 import { formatWeight } from '../utils/format';
 
 /** `/` 样本总览 */
@@ -34,6 +36,7 @@ export default function Overview() {
   const finds = useSampleStore((s) => s.finds);
   const sections = useSampleStore((s) => s.sections);
   const analysis = useSampleStore((s) => s.analysis);
+  const loans = useSampleStore((s) => s.loans);
 
   const ui = useUiStore();
 
@@ -48,6 +51,12 @@ export default function Overview() {
     analysis.forEach((a) => m.set(a.sampleId, (m.get(a.sampleId) ?? 0) + 1));
     return m;
   }, [analysis]);
+  const openLoanBySample = useMemo(
+    () => new Map(loans.filter((l) => l.status === 'open').map((l) => [l.sampleId, l])),
+    [loans],
+  );
+  const incompleteCount = useMemo(() => loans.filter(isIncomplete).length, [loans]);
+  const overdueCount = useMemo(() => loans.filter((l) => isOverdue(l)).length, [loans]);
 
   const totalWeight = results.reduce((n, s) => n + s.totalWeight, 0);
 
@@ -64,6 +73,31 @@ export default function Overview() {
           登记新样本
         </Button>
       </Stack>
+
+      {incompleteCount > 0 ? (
+        <Alert
+          severity="warning"
+          action={
+            <Button color="inherit" size="small" component={RouterLink} to="/loans">
+              去补全
+            </Button>
+          }
+        >
+          有 {incompleteCount} 份外借档案缺少借阅人或应还日期（旧册遗留），补全后追责链路才完整。
+        </Alert>
+      ) : null}
+      {overdueCount > 0 ? (
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" size="small" component={RouterLink} to="/loans">
+              去催还
+            </Button>
+          }
+        >
+          有 {overdueCount} 份外借档案已超期，请联系借用人归还。
+        </Alert>
+      ) : null}
 
       <Box
         sx={{
@@ -194,6 +228,7 @@ export default function Overview() {
                 find={findBySample.get(s.id)}
                 sectionCount={sectionCount.get(s.id) ?? 0}
                 analysisCount={analysisCount.get(s.id) ?? 0}
+                loan={openLoanBySample.get(s.id)}
               />
             </Grid>
           ))}

@@ -4,6 +4,11 @@ import {
   Box,
   Button,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   Divider,
   FormControl,
   Grid,
@@ -17,11 +22,13 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import { Link as RouterLink, useParams } from 'react-router-dom';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
 import SampleCard from '../components/common/SampleCard';
 import FieldGroup from '../components/common/FieldGroup';
 import ClassificationBadge from '../components/common/Badge';
 import EmptyState from '../components/common/EmptyState';
+import LoanPanel from '../components/loan/LoanPanel';
 import { useSampleStore } from '../stores/sampleStore';
 import { useToastStore } from '../stores/uiStore';
 import {
@@ -55,19 +62,25 @@ import { formatCoordinate } from '../utils/geo';
 /** `/samples/:id` 样本详情 */
 export default function Detail() {
   const { id = '' } = useParams();
+  const navigate = useNavigate();
   const samples = useSampleStore((s) => s.samples);
   const finds = useSampleStore((s) => s.finds);
   const sections = useSampleStore((s) => s.sections);
   const analysis = useSampleStore((s) => s.analysis);
   const addSection = useSampleStore((s) => s.addSection);
   const addAnalysis = useSampleStore((s) => s.addAnalysis);
-  const updateSample = useSampleStore((s) => s.updateSample);
+  const removeSample = useSampleStore((s) => s.removeSample);
+  const isSectionOnLoan = useSampleStore((s) => s.isSectionOnLoan);
   const notify = useToastStore((s) => s.notify);
 
   const sample = useMemo(() => samples.find((s) => s.id === id), [samples, id]);
   const find = useMemo(() => finds.find((f) => f.sampleId === id), [finds, id]);
   const mySections = useMemo(() => sections.filter((s) => s.sampleId === id), [sections, id]);
   const myAnalysis = useMemo(() => analysis.filter((a) => a.sampleId === id), [analysis, id]);
+
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [sectionDraft, setSectionDraft] = useState({
     sectionNo: '',
@@ -132,6 +145,19 @@ export default function Detail() {
     notify(`已为 ${sample.sampleNo} 写入一条检测记录`);
   };
 
+  const confirmDelete = async () => {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await removeSample(sample.id);
+      notify(`已清理样本 ${sample.sampleNo}`);
+      navigate('/');
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : '清理失败');
+      setDeleting(false);
+    }
+  };
+
   return (
     <Stack spacing={2.5}>
       <Stack direction="row" spacing={1.5} alignItems="center">
@@ -159,12 +185,10 @@ export default function Detail() {
                 <Button
                   size="small"
                   variant="outlined"
-                  onClick={() => {
-                    void updateSample(sample.id, { storage: sample.storage === 'loan-out' ? 'cabinet-a' : 'loan-out' });
-                    notify('已切换存放状态');
-                  }}
+                  component={RouterLink}
+                  to="/loans"
                 >
-                  切换存放状态
+                  借阅台账
                 </Button>
               </Stack>
               <ClassificationBadge
@@ -269,8 +293,35 @@ export default function Detail() {
                   该样本尚未登记发现地坐标，可返回 <RouterLink to="/samples/new">样本登记</RouterLink> 补录。
                 </Alert>
               )}
+              <Divider />
+              <Box>
+                <Typography variant="subtitle2" color="error">
+                  危险操作
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                  清理样本将删除其发现地、切片与检测记录；外借中的样本会被挡住（切断追责链路），已归还的借阅台账保留。
+                </Typography>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="error"
+                  startIcon={<DeleteForeverIcon />}
+                  onClick={() => {
+                    setDeleteError(null);
+                    setDeleteOpen(true);
+                  }}
+                >
+                  清理样本
+                </Button>
+              </Box>
             </Stack>
           </Paper>
+        </Grid>
+      </Grid>
+
+      <Grid container spacing={2.5}>
+        <Grid item xs={12}>
+          <LoanPanel sample={sample} />
         </Grid>
       </Grid>
 
@@ -297,6 +348,9 @@ export default function Detail() {
                         <Chip size="small" label={`厚度 ${s.thickness} μm`} />
                         <Chip size="small" variant="outlined" label={PREPARATION_LABELS[s.preparation]} />
                         <Chip size="small" color="secondary" label={SECTION_QUALITY_LABELS[s.quality]} />
+                        {isSectionOnLoan(s.id) ? (
+                          <Chip size="small" color="warning" label="随样外借中" />
+                        ) : null}
                       </Stack>
                     </Stack>
                     <Typography variant="body2" color="text.secondary">
@@ -546,6 +600,29 @@ export default function Detail() {
           </Paper>
         </Grid>
       </Grid>
+
+      <Dialog open={deleteOpen} onClose={deleting ? undefined : () => setDeleteOpen(false)}>
+        <DialogTitle>清理样本 {sample.sampleNo}</DialogTitle>
+        <DialogContent>
+          {deleteError ? (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {deleteError}
+            </Alert>
+          ) : null}
+          <DialogContentText>
+            确认清理该样本？其发现地、切片与检测记录将一并删除，且不可恢复。
+            若样本外借中，清理会被挡住；已归还的借阅台账仍保留用于审计。
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteOpen(false)} disabled={deleting}>
+            取消
+          </Button>
+          <Button variant="contained" color="error" onClick={confirmDelete} disabled={deleting}>
+            {deleting ? '清理中…' : '确认清理'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 }

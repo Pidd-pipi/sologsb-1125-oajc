@@ -6,6 +6,8 @@ import {
   type MeteoriteSample,
 } from '../../types/sample';
 import type { FindRecord } from '../../types/find';
+import type { LoanRecord } from '../../types/loan';
+import { isOverdue } from '../../utils/loan';
 import { formatWeight } from '../../utils/format';
 import { formatCoordinate } from '../../utils/geo';
 import { ClassificationBadge } from './Badge';
@@ -15,6 +17,8 @@ interface SampleCardProps {
   find?: FindRecord;
   sectionCount?: number;
   analysisCount?: number;
+  /** 该样本未关闭的借阅记录（外借中） */
+  loan?: LoanRecord;
   to?: string;
 }
 
@@ -24,11 +28,13 @@ export function SampleCard({
   find,
   sectionCount = 0,
   analysisCount = 0,
+  loan,
   to,
 }: SampleCardProps) {
   const missing: string[] = [];
   if (!find) missing.push('缺坐标');
   if (sectionCount === 0) missing.push('缺切片');
+  const overdue = loan ? isOverdue(loan) : false;
 
   return (
     <Card
@@ -82,6 +88,13 @@ export function SampleCard({
           <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 'auto', pt: 1 }}>
             <Chip size="small" variant="outlined" label={`切片 ${sectionCount}`} />
             <Chip size="small" variant="outlined" label={`检测 ${analysisCount}`} />
+            {loan ? (
+              overdue ? (
+                <Chip size="small" color="error" label="已超期" />
+              ) : (
+                <Chip size="small" color="secondary" label="外借中" />
+              )
+            ) : null}
             {missing.map((m) => (
               <Chip key={m} size="small" color="warning" label={m} />
             ))}

@@ -42,6 +42,7 @@ const theme = createTheme({
 const NAV = [
   { to: '/', label: '样本总览' },
   { to: '/samples/new', label: '样本登记' },
+  { to: '/loans', label: '借阅台账' },
   { to: '/sections', label: '切片库' },
   { to: '/analysis', label: '分析检测' },
   { to: '/locations', label: '发现地分布' },

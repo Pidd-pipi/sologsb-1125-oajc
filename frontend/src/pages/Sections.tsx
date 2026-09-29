@@ -37,6 +37,7 @@ export default function Sections() {
   const sections = useSampleStore((s) => s.sections);
   const samples = useSampleStore((s) => s.samples);
   const updateSection = useSampleStore((s) => s.updateSection);
+  const isSectionOnLoan = useSampleStore((s) => s.isSectionOnLoan);
   const notify = useToastStore((s) => s.notify);
   const { results } = useSampleFilter();
 
@@ -168,6 +169,9 @@ export default function Sections() {
                         {s.sectionNo}
                       </Typography>
                       <Chip size="small" color="secondary" label={SECTION_QUALITY_LABELS[s.quality]} />
+                      {isSectionOnLoan(s.id) ? (
+                        <Chip size="small" color="warning" label="随样外借中" />
+                      ) : null}
                     </Stack>
 
                     {sample ? (
