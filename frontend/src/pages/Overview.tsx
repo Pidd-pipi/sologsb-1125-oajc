@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -13,6 +14,7 @@ import {
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { Link as RouterLink } from 'react-router-dom';
 import SampleCard from '../components/common/SampleCard';
 import EmptyState from '../components/common/EmptyState';
@@ -25,6 +27,7 @@ import {
   SAMPLE_CATEGORIES,
   CHEMICAL_GROUPS,
 } from '../types/sample';
+import { isLoanOpen, isLoanOverdue, overdueDays } from '../types/loan';
 import { formatWeight } from '../utils/format';
 
 /** `/` 样本总览 */
@@ -34,6 +37,7 @@ export default function Overview() {
   const finds = useSampleStore((s) => s.finds);
   const sections = useSampleStore((s) => s.sections);
   const analysis = useSampleStore((s) => s.analysis);
+  const loans = useSampleStore((s) => s.loans);
 
   const ui = useUiStore();
 
@@ -48,6 +52,15 @@ export default function Overview() {
     analysis.forEach((a) => m.set(a.sampleId, (m.get(a.sampleId) ?? 0) + 1));
     return m;
   }, [analysis]);
+  const activeLoanBySample = useMemo(() => {
+    const m = new Map(loans.filter(isLoanOpen).map((l) => [l.sampleId, l]));
+    return m;
+  }, [loans]);
+
+  const overdueLoans = useMemo(
+    () => loans.filter((l) => isLoanOverdue(l)).sort((a, b) => (a.dueDate! < b.dueDate! ? -1 : 1)),
+    [loans],
+  );
 
   const totalWeight = results.reduce((n, s) => n + s.totalWeight, 0);
 
@@ -64,6 +77,45 @@ export default function Overview() {
           登记新样本
         </Button>
       </Stack>
+
+      {overdueLoans.length > 0 ? (
+        <Alert
+          severity="error"
+          icon={<WarningAmberIcon fontSize="inherit" />}
+          sx={{ alignItems: 'center' }}
+        >
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Typography variant="subtitle2">
+              超期提醒：{overdueLoans.length} 份外借样本已过应还日期
+            </Typography>
+            {overdueLoans.map((l) => {
+              const no = samples.find((s) => s.id === l.sampleId)?.sampleNo ?? l.sampleId;
+              return (
+                <Chip
+                  key={l.id}
+                  size="small"
+                  color="error"
+                  variant="outlined"
+                  component={RouterLink}
+                  to={`/samples/${l.sampleId}`}
+                  clickable
+                  label={`${no} · ${l.borrower ?? '借用人未登记'} · 超期 ${overdueDays(l)} 天`}
+                  sx={{ color: 'error.main' }}
+                />
+              );
+            })}
+            <Button
+              size="small"
+              color="error"
+              component={RouterLink}
+              to="/loans"
+              sx={{ textDecoration: 'underline' }}
+            >
+              前往借阅台账催还
+            </Button>
+          </Stack>
+        </Alert>
+      ) : null}
 
       <Box
         sx={{
@@ -194,6 +246,7 @@ export default function Overview() {
                 find={findBySample.get(s.id)}
                 sectionCount={sectionCount.get(s.id) ?? 0}
                 analysisCount={analysisCount.get(s.id) ?? 0}
+                activeLoan={activeLoanBySample.get(s.id)}
               />
             </Grid>
           ))}

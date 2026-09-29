@@ -41,6 +41,7 @@ const theme = createTheme({
 
 const NAV = [
   { to: '/', label: '样本总览' },
+  { to: '/loans', label: '借阅台账' },
   { to: '/samples/new', label: '样本登记' },
   { to: '/sections', label: '切片库' },
   { to: '/analysis', label: '分析检测' },
@@ -51,6 +52,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const loadAll = useSampleStore((s) => s.loadAll);
   const loaded = useSampleStore((s) => s.loaded);
   const sampleCount = useSampleStore((s) => s.samples.length);
+  const openLoanCount = useSampleStore(
+    (s) => s.loans.filter((l) => l.status !== 'returned').length,
+  );
   const toast = useToastStore();
   const location = useLocation();
 
@@ -77,6 +81,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
               label={`本地档案 ${sampleCount} 份样本`}
               sx={{ bgcolor: 'rgba(255,255,255,0.14)', color: '#f5efe4' }}
             />
+            {openLoanCount > 0 ? (
+              <Chip
+                size="small"
+                component={RouterLink}
+                to="/loans"
+                clickable
+                label={`外借中 ${openLoanCount} 份`}
+                sx={{ bgcolor: '#b85c38', color: '#fff', textDecoration: 'none' }}
+              />
+            ) : null}
             <Box sx={{ flex: 1 }} />
             <Typography variant="caption" sx={{ opacity: 0.8 }}>
               数据仅存于本机浏览器 · IndexedDB

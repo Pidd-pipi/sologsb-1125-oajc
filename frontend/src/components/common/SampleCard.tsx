@@ -6,6 +6,8 @@ import {
   type MeteoriteSample,
 } from '../../types/sample';
 import type { FindRecord } from '../../types/find';
+import type { LoanRecord } from '../../types/loan';
+import { isLoanOverdue } from '../../types/loan';
 import { formatWeight } from '../../utils/format';
 import { formatCoordinate } from '../../utils/geo';
 import { ClassificationBadge } from './Badge';
@@ -15,6 +17,8 @@ interface SampleCardProps {
   find?: FindRecord;
   sectionCount?: number;
   analysisCount?: number;
+  /** 当前未关闭的借阅单（外借中 / 旧册待补全），存在时卡片同步外借状态 */
+  activeLoan?: LoanRecord;
   to?: string;
 }
 
@@ -24,11 +28,13 @@ export function SampleCard({
   find,
   sectionCount = 0,
   analysisCount = 0,
+  activeLoan,
   to,
 }: SampleCardProps) {
   const missing: string[] = [];
   if (!find) missing.push('缺坐标');
   if (sectionCount === 0) missing.push('缺切片');
+  const overdue = activeLoan ? isLoanOverdue(activeLoan) : false;
 
   return (
     <Card
@@ -38,6 +44,8 @@ export function SampleCard({
         display: 'flex',
         flexDirection: 'column',
         borderRadius: 2.5,
+        borderColor: overdue ? 'error.main' : undefined,
+        borderWidth: overdue ? 2 : undefined,
         transition: 'box-shadow .2s ease, transform .2s ease',
         '&:hover': { boxShadow: 4, transform: 'translateY(-2px)' },
       }}
@@ -77,6 +85,28 @@ export function SampleCard({
               {formatCoordinate(find.longitude, find.latitude)} · 来源
               {find.coordinateSource === 'gps' ? 'GPS' : '文献'}
             </Typography>
+          ) : null}
+
+          {activeLoan ? (
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+              <Chip
+                size="small"
+                color={activeLoan.status === 'legacy' ? 'warning' : overdue ? 'error' : 'primary'}
+                label={
+                  activeLoan.status === 'legacy'
+                    ? '外借中 · 旧册待补全'
+                    : overdue
+                      ? '外借中 · 已超期'
+                      : `外借中 · ${activeLoan.borrower ?? ''}`
+                }
+                sx={{ fontWeight: 600 }}
+              />
+              {activeLoan.dueDate ? (
+                <Chip size="small" variant="outlined" color={overdue ? 'error' : 'default'} label={`应还 ${activeLoan.dueDate}`} />
+              ) : (
+                <Chip size="small" variant="outlined" color="warning" label="缺应还日期" />
+              )}
+            </Stack>
           ) : null}
 
           <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 'auto', pt: 1 }}>

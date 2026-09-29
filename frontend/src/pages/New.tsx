@@ -279,7 +279,7 @@ export default function New() {
                     value={value.storage}
                     onChange={(e) => patch({ storage: e.target.value as StorageLocation })}
                   >
-                    {STORAGE_LOCATIONS.map((s) => (
+                    {STORAGE_LOCATIONS.filter((loc) => loc !== 'loan-out').map((s) => (
                       <MenuItem key={s} value={s}>
                         {STORAGE_LABELS[s]}
                       </MenuItem>
@@ -287,6 +287,9 @@ export default function New() {
                   </Select>
                 </FormControl>
               </Stack>
+              <Typography variant="caption" color="text.secondary">
+                外借状态不在登记时直接选择：请在样本详情或借阅台账办理借出，系统会登记借用人、应还日期与随样切片。
+              </Typography>
               <TextField
                 size="small"
                 label="备注"

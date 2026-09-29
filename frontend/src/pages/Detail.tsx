@@ -17,13 +17,16 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import { Link as RouterLink, useParams } from 'react-router-dom';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
 import SampleCard from '../components/common/SampleCard';
 import FieldGroup from '../components/common/FieldGroup';
 import ClassificationBadge from '../components/common/Badge';
 import EmptyState from '../components/common/EmptyState';
-import { useSampleStore } from '../stores/sampleStore';
+import LoanPanel from '../components/loan/LoanPanel';
+import { LoanActionError, useSampleStore } from '../stores/sampleStore';
 import { useToastStore } from '../stores/uiStore';
+import { isLoanOpen } from '../types/loan';
 import {
   ANALYSIS_METHODS,
   ANALYSIS_METHOD_LABELS,
@@ -55,19 +58,25 @@ import { formatCoordinate } from '../utils/geo';
 /** `/samples/:id` 样本详情 */
 export default function Detail() {
   const { id = '' } = useParams();
+  const navigate = useNavigate();
   const samples = useSampleStore((s) => s.samples);
   const finds = useSampleStore((s) => s.finds);
   const sections = useSampleStore((s) => s.sections);
   const analysis = useSampleStore((s) => s.analysis);
+  const loans = useSampleStore((s) => s.loans);
   const addSection = useSampleStore((s) => s.addSection);
   const addAnalysis = useSampleStore((s) => s.addAnalysis);
-  const updateSample = useSampleStore((s) => s.updateSample);
+  const removeSample = useSampleStore((s) => s.removeSample);
   const notify = useToastStore((s) => s.notify);
 
   const sample = useMemo(() => samples.find((s) => s.id === id), [samples, id]);
   const find = useMemo(() => finds.find((f) => f.sampleId === id), [finds, id]);
   const mySections = useMemo(() => sections.filter((s) => s.sampleId === id), [sections, id]);
   const myAnalysis = useMemo(() => analysis.filter((a) => a.sampleId === id), [analysis, id]);
+  const openLoan = useMemo(
+    () => loans.find((l) => l.sampleId === id && isLoanOpen(l)),
+    [loans, id],
+  );
 
   const [sectionDraft, setSectionDraft] = useState({
     sectionNo: '',
@@ -132,6 +141,29 @@ export default function Detail() {
     notify(`已为 ${sample.sampleNo} 写入一条检测记录`);
   };
 
+  const handleRemove = async () => {
+    // 外借中（含旧册待补全）的清理会被 store 拒绝，这里前置提示原因
+    if (openLoan) {
+      notify(
+        openLoan.status === 'legacy'
+          ? '旧册待补全的外借样本不能清理，请先在下方台账补全并归还'
+          : '样本仍在外借中，归还前不能清理',
+        'error',
+      );
+      return;
+    }
+    if (!window.confirm(`确认清理样本 ${sample.sampleNo}？其发现地、切片与检测记录将一并删除，已归还借阅历史保留。`)) {
+      return;
+    }
+    try {
+      await removeSample(sample.id);
+      notify('样本档案已清理，已归还借阅历史保留在台账中');
+      navigate('/');
+    } catch (err) {
+      notify(err instanceof LoanActionError ? err.message : '清理失败', 'error');
+    }
+  };
+
   return (
     <Stack spacing={2.5}>
       <Stack direction="row" spacing={1.5} alignItems="center">
@@ -148,23 +180,23 @@ export default function Detail() {
             find={find}
             sectionCount={mySections.length}
             analysisCount={myAnalysis.length}
+            activeLoan={openLoan}
           />
         </Grid>
 
         <Grid item xs={12} md={8}>
           <Paper variant="outlined" sx={{ p: 2.5, height: '100%' }}>
             <Stack spacing={1.5}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
+              <Stack direction="row" spacing={1} alignItems="center">
                 <Typography variant="h6">基本信息</Typography>
                 <Button
                   size="small"
+                  color="error"
                   variant="outlined"
-                  onClick={() => {
-                    void updateSample(sample.id, { storage: sample.storage === 'loan-out' ? 'cabinet-a' : 'loan-out' });
-                    notify('已切换存放状态');
-                  }}
+                  startIcon={<DeleteOutlineIcon />}
+                  onClick={() => void handleRemove()}
                 >
-                  切换存放状态
+                  清理档案
                 </Button>
               </Stack>
               <ClassificationBadge
@@ -274,6 +306,8 @@ export default function Detail() {
         </Grid>
       </Grid>
 
+      <LoanPanel key={sample.id} sampleId={sample.id} />
+
       <Grid container spacing={2.5}>
         <Grid item xs={12} md={7}>
           <Paper variant="outlined" sx={{ p: 2.5 }}>
@@ -297,6 +331,13 @@ export default function Detail() {
                         <Chip size="small" label={`厚度 ${s.thickness} μm`} />
                         <Chip size="small" variant="outlined" label={PREPARATION_LABELS[s.preparation]} />
                         <Chip size="small" color="secondary" label={SECTION_QUALITY_LABELS[s.quality]} />
+                        {openLoan?.sectionIds.includes(s.id) ? (
+                          <Chip
+                            size="small"
+                            color={openLoan.status === 'legacy' ? 'warning' : 'primary'}
+                            label={`随样外借 · ${openLoan.borrower ?? '借用人未登记'}`}
+                          />
+                        ) : null}
                       </Stack>
                     </Stack>
                     <Typography variant="body2" color="text.secondary">

@@ -30,12 +30,14 @@ import {
   mineralTotal,
   type SectionQuality,
 } from '../types/section';
+import { isLoanOpen, isLoanOverdue } from '../types/loan';
 import { formatDate } from '../utils/format';
 
 /** `/sections` 切片库 */
 export default function Sections() {
   const sections = useSampleStore((s) => s.sections);
   const samples = useSampleStore((s) => s.samples);
+  const loans = useSampleStore((s) => s.loans);
   const updateSection = useSampleStore((s) => s.updateSection);
   const notify = useToastStore((s) => s.notify);
   const { results } = useSampleFilter();
@@ -48,6 +50,11 @@ export default function Sections() {
 
   const sampleMap = useMemo(() => new Map(samples.map((s) => [s.id, s])), [samples]);
   const visibleSampleIds = useMemo(() => new Set(results.map((s) => s.id)), [results]);
+  /** 样本 id → 未关闭借阅单（切片库同步显示外借状态） */
+  const loanBySample = useMemo(
+    () => new Map(loans.filter(isLoanOpen).map((l) => [l.sampleId, l])),
+    [loans],
+  );
 
   const filtered = useMemo(
     () =>
@@ -153,6 +160,8 @@ export default function Sections() {
           {filtered.map((s) => {
             const sample = sampleMap.get(s.sampleId);
             const sum = mineralTotal(s.minerals);
+            const loan = sample ? loanBySample.get(sample.id) : undefined;
+            const withSample = !!loan?.sectionIds.includes(s.id);
             return (
               <Grid item xs={12} sm={6} md={4} key={s.id}>
                 <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
@@ -169,6 +178,24 @@ export default function Sections() {
                       </Typography>
                       <Chip size="small" color="secondary" label={SECTION_QUALITY_LABELS[s.quality]} />
                     </Stack>
+
+                    {loan ? (
+                      <Chip
+                        size="small"
+                        color={withSample ? (isLoanOverdue(loan) ? 'error' : 'primary') : 'default'}
+                        variant={withSample ? 'filled' : 'outlined'}
+                        sx={{ alignSelf: 'flex-start' }}
+                        label={
+                          withSample
+                            ? `随样外借 · ${loan.borrower ?? '借用人未登记'}${
+                                isLoanOverdue(loan) ? ' · 已超期' : ''
+                              }`
+                            : loan.status === 'legacy'
+                              ? '所属样本外借中 · 旧册待补全'
+                              : '所属样本外借中（未随样）'
+                        }
+                      />
+                    ) : null}
 
                     {sample ? (
                       <Stack spacing={0.5}>
